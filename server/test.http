@@ -1,0 +1,10 @@
+### Test Log Ingestion
+POST http://127.0.0.1:5000/ingest
+Content-Type: application/json
+x-api-key: sentinel_dev_key
+
+{
+  "level": "INFO",
+  "message": "User 'instagram' logged in successfully",
+  "source": "Auth-Service"
+}
