@@ -8,9 +8,11 @@ import {
   Filter, 
   Database, 
   Clock, 
-  Layers 
+  Layers,
+  BarChart3
 } from 'lucide-react';
-
+import LogChart from './components/LogChart';
+import LevelPieChart from './components/LevelPieChart';
 
 const socket = io('http://localhost:5000');
 
@@ -18,6 +20,8 @@ function App() {
   const [logs, setLogs] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterLevel, setFilterLevel] = useState('ALL');
+  const [chartData, setChartData] = useState([]);
+  const [queueSize, setQueueSize] = useState(0);
 
   const filteredLogs = logs.filter(log => {
     const matchesSearch = 
@@ -29,27 +33,71 @@ function App() {
 
   useEffect(() => {
     const fetchHistory = async () => {
+  try {
+    const response = await fetch('http://localhost:5000/logs');
+    const data = await response.json();
+    
+    // Safety check: Only set logs if data is actually an array
+    if (Array.isArray(data)) {
+      setLogs(data);
+      
+      const historyCounts = {};
+      data.slice(0, 50).forEach(log => {
+        const time = new Date(log.timestamp).toLocaleTimeString();
+        historyCounts[time] = (historyCounts[time] || 0) + 1;
+      });
+
+      const initialChart = Object.keys(historyCounts).map(time => ({
+        time,
+        count: historyCounts[time]
+      })).slice(-20);
+
+      setChartData(initialChart);
+    } else {
+      console.error("API did not return an array:", data);
+      setLogs([]); // Fallback to empty array
+    }
+  } catch (err) {
+    console.error("Fetch error:", err);
+    setLogs([]); 
+  }
+};
+
+    const fetchQueueSize = async () => {
       try {
-        const response = await fetch('http://localhost:5000/logs');
+        const response = await fetch('http://localhost:5000/queue-size');
         const data = await response.json();
-        setLogs(data);
+        setQueueSize(data.size || 0);
       } catch (err) {
-        console.error("History fetch failed:", err);
+        console.error(err);
       }
     };
-    fetchHistory();
 
-    
+    fetchHistory();
+    const queueInterval = setInterval(fetchQueueSize, 2000);
+
     socket.on('new-log', (log) => {
-      setLogs((prev) => [log, ...prev].slice(0, 100)); 
+      const now = new Date().toLocaleTimeString();
+      setLogs((prev) => [log, ...prev].slice(0, 500));
+      setChartData((prevData) => {
+        const lastPoint = prevData[prevData.length - 1];
+        if (lastPoint && lastPoint.time === now) {
+          const updatedLastPoint = { ...lastPoint, count: lastPoint.count + 1 };
+          return [...prevData.slice(0, -1), updatedLastPoint];
+        } else {
+          return [...prevData, { time: now, count: 1 }].slice(-20);
+        }
+      });
     });
 
-    return () => socket.off('new-log');
+    return () => {
+      socket.off('new-log');
+      clearInterval(queueInterval);
+    };
   }, []);
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-300 font-sans selection:bg-blue-500/30">
-      {/* Top Navigation Bar */}
       <nav className="border-b border-slate-800 bg-[#020617]/80 backdrop-blur-md sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -69,14 +117,35 @@ function App() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* Analytics Overview Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-          <StatCard title="Total Logs (DB)" value={logs.length} icon={<Database size={20}/>} color="text-blue-400" />
-          <StatCard title="Critical Events" value={logs.filter(l => l.level === 'CRITICAL').length} icon={<ShieldAlert size={20}/>} color="text-red-400" />
-          <StatCard title="Active Filters" value={filteredLogs.length} icon={<Layers size={20}/>} color="text-indigo-400" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+          <div className="lg:col-span-2 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm">
+            <div className="flex items-center gap-2 mb-6">
+              <BarChart3 className="text-blue-500" size={18} />
+              <h2 className="text-sm font-bold uppercase tracking-widest text-slate-100">Live Ingestion Trend</h2>
+            </div>
+            <div style={{ height: '300px', width: '100%', position: 'relative' }}>
+              <LogChart chartData={chartData} />
+            </div>
+          </div>
+
+          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm">
+            <div className="flex items-center gap-2 mb-6">
+              <Activity className="text-indigo-500" size={18} />
+              <h2 className="text-sm font-bold uppercase tracking-widest text-slate-100">Severity Mix</h2>
+            </div>
+            <div style={{ height: '300px', width: '100%', position: 'relative' }}>
+              <LevelPieChart logs={logs} />
+            </div>
+          </div>
         </div>
 
-        {/* Search & Filter Control Center */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
+          <StatCard title="Total Logs" value={logs.length} icon={<Database size={20}/>} color="text-blue-400" />
+          <StatCard title="Pending (Redis)" value={queueSize} icon={<Clock size={20}/>} color="text-orange-400" />
+          <StatCard title="Critical" value={logs.filter(l => l.level === 'CRITICAL').length} icon={<ShieldAlert size={20}/>} color="text-red-400" />
+          <StatCard title="Filtered" value={filteredLogs.length} icon={<Layers size={20}/>} color="text-indigo-400" />
+        </div>
+
         <div className="bg-slate-900/50 border border-slate-800 p-4 rounded-2xl mb-8 flex flex-wrap gap-4 items-center shadow-inner">
           <div className="relative flex-grow min-w-[280px]">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
@@ -102,7 +171,6 @@ function App() {
           </div>
         </div>
 
-        {/* Real-time Log Stream Table */}
         <div className="bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden backdrop-blur-sm shadow-2xl">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -155,7 +223,6 @@ function App() {
     </div>
   );
 }
-
 
 function StatCard({ title, value, icon, color }) {
   return (

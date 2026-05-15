@@ -8,7 +8,7 @@ const sources = ['Auth-Service', 'Payment-Gateway', 'Inventory-Manager', 'User-P
 const levels = ['INFO', 'WARN', 'ERROR', 'CRITICAL'];
 
 async function sendLogs() {
-    console.log("🚀 Starting Stress Test: Sending 100 logs...");
+    console.log("Starting Stress Test: Sending 100 logs...");
     
     for (let i = 0; i < 100; i++) {
         const log = {
@@ -17,13 +17,12 @@ async function sendLogs() {
             source: sources[Math.floor(Math.random() * sources.length)]
         };
 
-        axios.post(API_URL, log, { headers: { 'x-api-key': API_KEY } })
+       await axios.post(API_URL, log, { headers: { 'x-api-key': API_KEY } })
             .catch(err => console.error("Failed to send log"));
             
-        // Small delay to make it look cool on the dashboard
         await new Promise(r => setTimeout(r, 80)); 
     }
-    console.log("✅ Stress Test Complete.");
+    console.log("Stress Test Complete.");
 }
 
 sendLogs();

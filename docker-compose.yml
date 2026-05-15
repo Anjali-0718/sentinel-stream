@@ -13,22 +13,42 @@ services:
     ports:
       - "6379:6379"
 
-  # Adding your Ingestion Server
   api-server:
     build: ./server
     container_name: sentinel_backend
     ports:
       - "5000:5000"
+    env_file: ./server/.env
+    # This maps your local folder to the container's app folder
+    volumes:
+      - ./server:/app
+      - /app/node_modules
     depends_on:
       - mongodb
       - redis
 
-  # Adding your React Dashboard
+  worker:
+    build: ./server
+    container_name: sentinel_worker
+    command: node worker.js 
+    env_file: ./server/.env
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    depends_on:
+      - mongodb
+      - redis
+
   frontend:
     build: ./dashboard
     container_name: sentinel_frontend
     ports:
       - "5173:5173"
+    volumes:
+      - ./dashboard:/app
+      - /app/node_modules
+    depends_on:
+      - api-server
 
 volumes:
   mongo_data:

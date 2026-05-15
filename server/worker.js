@@ -21,7 +21,7 @@ const redisClient = createClient({ url: process.env.REDIS_URL });
 async function processLogs() {
     try {
         // Connect to MongoDB and Redis
-        await mongoose.connect(process.env.MONGO_URI);
+        await mongoose.connect(process.env.MONGODB_URI);
         await redisClient.connect();
         console.log("Worker connected to MongoDB and Redis...");
 
