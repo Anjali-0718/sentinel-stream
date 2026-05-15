@@ -12,8 +12,8 @@ export default defineConfig({
     port: 5173,
     watch: {
       usePolling: true,
-      interval: 1000, // Increase interval to once per second
-      ignored: ['**/node_modules/**', '**/dist/**'], // DO NOT SCAN THESE
+      interval: 1000, 
+      ignored: ['**/node_modules/**', '**/dist/**'], 
     }
   }
 })

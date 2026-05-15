@@ -28,8 +28,8 @@ const redisClient = createClient({ url: process.env.REDIS_URL });
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
 
 mongoose.connect(process.env.MONGODB_URI)
-    .then(() => console.log("✅ History DB Connected"))
-    .catch(err => console.error("❌ History DB Connection Error:", err));
+    .then(() => console.log("DB Connected"))
+    .catch(err => console.error("DB Connection Error:", err));
 
 const logSchema = z.object({
     level: z.enum(['INFO', 'WARN', 'ERROR', 'CRITICAL']),
@@ -85,7 +85,7 @@ async function startServer() {
     try {
         await redisClient.connect();
         server.listen(PORT, () => {
-            console.log(`🚀 Ingestion Server (Fast-Path) live on port ${PORT}`);
+            console.log(`Ingestion Server (Fast-Path) live on port ${PORT}`);
         });
     } catch (err) {
         console.error("Failed to start server:", err);
