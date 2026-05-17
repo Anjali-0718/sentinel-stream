@@ -45,6 +45,59 @@ const Log = mongoose.model('Log', new mongoose.Schema({
     timestamp: { type: Date, default: Date.now }
 }));
 
+const slidingWindowLua = `
+    local key = KEYS[1]
+    local now = tonumber(ARGV[1])
+    local window_start = tonumber(ARGV[2])
+    local limit = tonumber(ARGV[3])
+    
+    redis.call('ZREMRANGEBYSCORE', key, 0, window_start)
+    
+    local current_requests = redis.call('ZCARD', key)
+    
+    if current_requests < limit then
+        redis.call('ZADD', key, now, now)
+        redis.call('EXPIRE', key, 65)
+        return limit - current_requests - 1
+    else
+        return -1
+    end
+`;
+
+async function slidingWindowRateLimiter(req, res, next) {
+    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const key = `rate_limit:${ip}`;
+    
+    const LIMIT = 100;         
+    const WINDOW_SIZE_MS = 60000; 
+    
+    const now = Date.now();
+    const windowStart = now - WINDOW_SIZE_MS;
+
+    try {
+        const remaining = await redisClient.eval(slidingWindowLua, {
+            keys: [key],
+            arguments: [now.toString(), windowStart.toString(), LIMIT.toString()]
+        });
+
+        res.setHeader('X-RateLimit-Limit', LIMIT);
+
+        if (remaining === -1) {
+            res.setHeader('X-RateLimit-Remaining', 0);
+            return res.status(429).json({
+                error: 'Too Many Requests',
+                message: `You have exceeded the sliding window limit of ${LIMIT} logs per minute. Please try again shortly.`
+            });
+        }
+
+        res.setHeader('X-RateLimit-Remaining', remaining);
+        next();
+    } catch (error) {
+        console.error('Sliding Window Rate Limiter Error:', error);
+        next(); 
+    }
+}
+
 app.get('/logs', async (req, res) => {
     try {
         const logs = await Log.find().sort({ timestamp: -1 }).limit(500);
@@ -63,7 +116,7 @@ app.get('/queue-size', async (req, res) => {
     }
 });
 
-app.post('/ingest', async (req, res) => {
+app.post('/ingest', slidingWindowRateLimiter, async (req, res) => {
     const apiKey = req.headers['x-api-key'];
     if (apiKey !== process.env.API_KEY) {
         return res.status(401).json({ error: 'Unauthorized' });
