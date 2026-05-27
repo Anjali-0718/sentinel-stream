@@ -1,28 +1,64 @@
-// stress_test.js
 const axios = require('axios');
 
 const API_URL = 'http://localhost:5000/ingest';
-const API_KEY = 'sentinel_dev_key'; 
+const API_KEY = 'sentinel_dev_key';
 
 const sources = ['Auth-Service', 'Payment-Gateway', 'Inventory-Manager', 'User-Profile'];
 const levels = ['INFO', 'WARN', 'ERROR', 'CRITICAL'];
 
-async function sendLogs() {
-    console.log("Starting Stress Test: Sending 100 logs...");
-    
-    for (let i = 0; i < 100; i++) {
-        const log = {
-            level: levels[Math.floor(Math.random() * levels.length)],
-            message: `Automatic system check - Sequence ${i}`,
-            source: sources[Math.floor(Math.random() * sources.length)]
-        };
+const TOTAL_REQUESTS = 2000;
+const CONCURRENCY = 50;
 
-       await axios.post(API_URL, log, { headers: { 'x-api-key': API_KEY } })
-            .catch(err => console.error("Failed to send log"));
-            
-        await new Promise(r => setTimeout(r, 80)); 
-    }
-    console.log("Stress Test Complete.");
+let success = 0;
+let fail = 0;
+
+function randomLog(i) {
+  return {
+    level: levels[Math.floor(Math.random() * levels.length)],
+    message: `Stress test log ${i}`,
+    source: sources[Math.floor(Math.random() * sources.length)]
+  };
 }
 
-sendLogs();
+async function sendBatch(start, end) {
+  const promises = [];
+
+  for (let i = start; i < end; i++) {
+    const fakeIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.0.1`;
+
+    promises.push(
+      axios.post(API_URL, randomLog(i), {
+        headers: { 
+          'x-api-key': API_KEY,
+          'x-forwarded-for': fakeIp 
+        },
+        timeout: 5000
+      })
+      .then(() => success++)
+      .catch(() => fail++)
+    );
+  }
+
+  await Promise.all(promises);
+}
+
+async function runStressTest() {
+  console.log("Starting REAL stress test...");
+  const startTime = Date.now();
+
+  for (let i = 0; i < TOTAL_REQUESTS; i += CONCURRENCY) {
+    await sendBatch(i, i + CONCURRENCY);
+  }
+
+  const endTime = Date.now();
+
+  console.log("\n STRESS TEST RESULTS");
+  console.log("----------------------");
+  console.log("Total:", TOTAL_REQUESTS);
+  console.log("Success:", success);
+  console.log("Failed:", fail);
+  console.log("Time:", (endTime - startTime) / 1000, "sec");
+  console.log("Req/sec:", (TOTAL_REQUESTS / ((endTime - startTime) / 1000)).toFixed(2));
+}
+
+runStressTest();

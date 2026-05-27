@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { io } from 'socket.io-client';
 import { 
   Activity, 
@@ -13,7 +13,8 @@ import {
 } from 'lucide-react';
 import LogChart from './components/LogChart';
 
-const socket = io('http://localhost:5000');
+const API_BASE = 'http://localhost:5000';
+const socket = io(API_BASE);
 
 function App() {
   const [logs, setLogs] = useState([]);
@@ -22,81 +23,83 @@ function App() {
   const [chartData, setChartData] = useState([]);
   const [queueSize, setQueueSize] = useState(0);
 
-  const filteredLogs = logs.filter(log => {
-    const matchesSearch = 
-      log.message.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      log.source.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesLevel = filterLevel === 'ALL' || log.level === filterLevel;
-    return matchesSearch && matchesLevel;
-  });
+  const search = searchTerm.toLowerCase();
+
+  const filteredLogs = useMemo(() => {
+    return logs.filter((log) => {
+      const message = log.message?.toLowerCase() || '';
+      const source = log.source?.toLowerCase() || '';
+      const matchesSearch = message.includes(search) || source.includes(search);
+      const matchesLevel = filterLevel === 'ALL' || log.level === filterLevel;
+      return matchesSearch && matchesLevel;
+    });
+  }, [logs, search, filterLevel]);
 
   useEffect(() => {
     const fetchHistory = async () => {
       try {
-        const response = await fetch('http://localhost:5000/logs');
-        const data = await response.json();
+        const res = await fetch(`${API_BASE}/logs`);
+        const data = await res.json();
         
-        if (Array.isArray(data)) {
-          setLogs(data);
-          
-          const historyCounts = {};
-          data.slice(0, 50).forEach(log => {
-            const time = new Date(log.timestamp).toLocaleTimeString();
-            historyCounts[time] = (historyCounts[time] || 0) + 1;
-          });
-
-          const initialChart = Object.keys(historyCounts).map(time => ({
-            time,
-            count: historyCounts[time]
-          })).slice(-20);
-
-          setChartData(initialChart);
-        } else {
-          console.error("API did not return an array:", data);
-          setLogs([]);
-        }
+        if (!Array.isArray(data)) return;
+        
+        setLogs(data);
+        
+        const map = new Map();
+        data.slice(0, 50).forEach((log) => {
+          const time = new Date(log.timestamp).toLocaleTimeString();
+          map.set(time, (map.get(time) || 0) + 1);
+        });
+        
+        const initialChart = Array.from(map, ([time, count]) => ({
+          time,
+          count
+        })).slice(-20);
+        
+        setChartData(initialChart);
       } catch (err) {
-        console.error("Fetch error:", err);
-        setLogs([]); 
+        setLogs([]);
       }
     };
 
     const fetchQueueSize = async () => {
       try {
-        const response = await fetch('http://localhost:5000/queue-size');
-        const data = await response.json();
-        setQueueSize(data.size || 0);
-      } catch (err) {
-        console.error(err);
-      }
+        const res = await fetch(`${API_BASE}/queue-size`);
+        const data = await res.json();
+        setQueueSize(data?.size || 0);
+      } catch (err) {}
     };
 
     fetchHistory();
-    const queueInterval = setInterval(fetchQueueSize, 2000);
+    const interval = setInterval(fetchQueueSize, 2000);
 
-    socket.on('new-log', (log) => {
+    const handleNewLog = (log) => {
       const now = new Date().toLocaleTimeString();
+      
       setLogs((prev) => [log, ...prev].slice(0, 500));
-      setChartData((prevData) => {
-        const lastPoint = prevData[prevData.length - 1];
-        if (lastPoint && lastPoint.time === now) {
-          const updatedLastPoint = { ...lastPoint, count: lastPoint.count + 1 };
-          return [...prevData.slice(0, -1), updatedLastPoint];
-        } else {
-          return [...prevData, { time: now, count: 1 }].slice(-20);
+      
+      setChartData((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.time === now) {
+          return [
+            ...prev.slice(0, -1),
+            { ...last, count: last.count + 1 }
+          ];
         }
+        return [...prev, { time: now, count: 1 }].slice(-20);
       });
-    });
+    };
+
+    socket.on('new-log', handleNewLog);
 
     return () => {
-      socket.off('new-log');
-      clearInterval(queueInterval);
+      socket.off('new-log', handleNewLog);
+      clearInterval(interval);
     };
   }, []);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans relative overflow-x-hidden selection:bg-indigo-500/30">
-      {/* Decorative background ambient glows */}
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-indigo-900/10 blur-[120px] pointer-events-none" />
       <div className="absolute top-[40%] right-[-10%] w-[600px] h-[600px] rounded-full bg-blue-900/10 blur-[150px] pointer-events-none" />
 
@@ -119,7 +122,6 @@ function App() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-6 py-8 relative z-10">
-        {/* Main Chart Container with Glassmorphism */}
         <div className="grid grid-cols-1 gap-6 mb-8">
           <div className="bg-white/[0.02] border border-white/5 backdrop-blur-md rounded-2xl p-6 shadow-2xl shadow-black/40">
             <div className="flex items-center gap-2 mb-6">
@@ -134,7 +136,6 @@ function App() {
           </div>
         </div>
 
-        {/* Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <StatCard title="Total Ingested" value={logs.length} icon={<Database size={18}/>} gradient="from-blue-500/10 to-indigo-500/5" iconColor="text-blue-400" />
           <StatCard title="Buffered (Redis)" value={queueSize} icon={<Clock size={18}/>} gradient="from-amber-500/10 to-orange-500/5" iconColor="text-amber-400" />
@@ -142,7 +143,6 @@ function App() {
           <StatCard title="Matched Filter" value={filteredLogs.length} icon={<Layers size={18}/>} gradient="from-purple-500/10 to-pink-500/5" iconColor="text-purple-400" />
         </div>
 
-        {/* Filter Toolbar Box */}
         <div className="bg-white/[0.01] border border-white/5 backdrop-blur-md p-4 rounded-2xl mb-6 flex flex-wrap gap-4 items-center shadow-lg shadow-black/10">
           <div className="relative flex-grow min-w-[280px]">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
@@ -168,7 +168,6 @@ function App() {
           </div>
         </div>
 
-        {/* Real-time Log Stream Terminal Grid */}
         <div className="bg-white/[0.02] border border-white/5 backdrop-blur-md rounded-2xl overflow-hidden shadow-2xl shadow-black/50">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -192,7 +191,7 @@ function App() {
                   </tr>
                 ) : (
                   filteredLogs.map((log, index) => (
-                    <tr key={index} className="hover:bg-white/[0.01] transition-colors group">
+                    <tr key={`${log.timestamp}-${index}`} className="hover:bg-white/[0.01] transition-colors group">
                       <td className="px-6 py-3.5">
                         <Badge level={log.level} />
                       </td>
